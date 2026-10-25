@@ -1,20 +1,11 @@
-import {
-  useEffect,
-  useState,
-  useRef,
-  useCallback,
-} from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 
 import Sidebar from "./components/Sidebar/Sidebar";
 import ChatHeader from "./components/ChatHeader/ChatHeader";
 import MessageList from "./components/MessageList/MessageList";
 import ChatInput from "./components/ChatInput/ChatInput";
 
-import {
-  getConversations,
-  sendMessage,
-  getErrorMessage,
-} from "./api/chatApi";
+import { getConversations, sendMessage, getErrorMessage } from "./api/chatApi";
 
 import "./App.css";
 
@@ -25,93 +16,115 @@ function App() {
 
   const messagesEndRef = useRef(null);
 
+  // =====================================================
   // Scroll to bottom
+  // =====================================================
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth",
     });
   }, []);
 
+  // =====================================================
   // GET conversations
+  // =====================================================
+
   const loadConversations = useCallback(async () => {
     try {
+      setError("");
+
       const result = await getConversations();
 
-      if (result.success) {
+      console.log("GET conversations response:", result);
+
+      if (result?.success) {
+        const conversationData = result?.data?.conversations;
+
         setConversations(
-          result.data.conversations
+          Array.isArray(conversationData) ? conversationData : [],
         );
-        setError("");
+      } else {
+        setError(result?.message || "Unable to load conversations.");
       }
     } catch (fetchError) {
-      console.error(
-        "Error fetching conversations:",
-        fetchError
-      );
+      console.error("Error fetching conversations:", fetchError);
 
       setError(getErrorMessage(fetchError));
     }
   }, []);
 
+  // =====================================================
   // Load conversations when application starts
+  // =====================================================
+
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
 
+  // =====================================================
   // Scroll whenever messages change
+  // =====================================================
+
   useEffect(() => {
     scrollToBottom();
   }, [conversations, isLoading, scrollToBottom]);
 
-  // POST question
+  // =====================================================
+  // POST message
+  // =====================================================
+
   const handleSendMessage = async (question) => {
-    if (!question.trim() || isLoading) {
+    const cleanQuestion = question?.trim();
+
+    if (!cleanQuestion || isLoading) {
       return;
     }
 
-    // Temporary user message
+    // Temporary message shown immediately
     const tempUserMessage = {
       id: `temp-${Date.now()}`,
       role: "user",
-      content: question,
+      content: cleanQuestion,
     };
 
-    // Show user message immediately
-    setConversations((prev) => [
-      ...prev,
-      tempUserMessage,
-    ]);
+    setConversations((previous) => [...previous, tempUserMessage]);
 
     setIsLoading(true);
     setError("");
 
     try {
-      const result = await sendMessage(question);
+      const result = await sendMessage(cleanQuestion);
 
-      if (result.success) {
-        const {
-          userConversation,
-          assistantConversation,
-        } = result.data;
+      console.log("POST conversation response:", result);
 
-        // Replace temporary message
-        setConversations((prev) => {
-          const filtered = prev.filter(
-            (message) =>
-              message.id !== tempUserMessage.id
-          );
-
-          return [
-            ...filtered,
-            userConversation,
-            assistantConversation,
-          ];
-        });
+      if (!result?.success) {
+        throw new Error(result?.message || "Failed to send message.");
       }
+
+      const userConversation = result?.data?.userConversation;
+
+      const assistantConversation = result?.data?.assistantConversation;
+
+      if (!userConversation || !assistantConversation) {
+        throw new Error("Invalid response received from the server.");
+      }
+
+      // Remove temporary message and replace it
+      // with messages returned by the database/API.
+      setConversations((previous) => {
+        const withoutTemporary = previous.filter(
+          (message) => message.id !== tempUserMessage.id,
+        );
+
+        return [...withoutTemporary, userConversation, assistantConversation];
+      });
     } catch (sendError) {
-      console.error(
-        "Error posting conversation:",
-        sendError
+      console.error("Error posting conversation:", sendError);
+
+      // Remove temporary message if POST failed
+      setConversations((previous) =>
+        previous.filter((message) => message.id !== tempUserMessage.id),
       );
 
       setError(getErrorMessage(sendError));
@@ -120,6 +133,10 @@ function App() {
     }
   };
 
+  // =====================================================
+  // UI
+  // =====================================================
+
   return (
     <div className="app">
       <Sidebar />
@@ -127,18 +144,19 @@ function App() {
       <main className="chat">
         <ChatHeader />
 
-        {error ? (
+        {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
+
             <button
               type="button"
               className="error-banner__retry"
-              onClick={() => loadConversations()}
+              onClick={loadConversations}
             >
               Retry
             </button>
           </div>
-        ) : null}
+        )}
 
         <MessageList
           conversations={conversations}
